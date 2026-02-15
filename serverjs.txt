@@ -1,0 +1,202 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+// --- LÓGICA DEL SERVIDOR Y PYBOT ---
+io.on('connection', (socket) => {
+    
+    socket.on('nuevo_usuario', (user) => {
+        socket.broadcast.emit('mensaje_recibido', { 
+            texto: `${user.nombre} se ha unido a PyChat`, 
+            tipo: 'sistema' 
+        });
+        // Saludo privado de PyBot
+        socket.emit('mensaje_recibido', { 
+            nombre: '🤖 PyBot', 
+            texto: `¡Hola ${user.nombre}! Bienvenido a PyChat. Escribe /ayuda para ver mis comandos.`, 
+            tipo: 'recibido' 
+        });
+    });
+
+    socket.on('mensaje_enviado', async (data) => {
+        // Enviar el mensaje original a todos
+        socket.broadcast.emit('mensaje_recibido', data);
+
+        // Lógica de Comandos de PyBot
+        if (data.texto && data.texto.startsWith('/')) {
+            const cmd = data.texto.toLowerCase().split(' ')[0];
+            
+            if (cmd === '/ayuda') {
+                socket.emit('mensaje_recibido', { nombre: '🤖 PyBot', texto: "Comandos: /hora, /clima, /dado, /miau, /limpiar", tipo: 'recibido' });
+            } 
+            else if (cmd === '/hora') {
+                socket.emit('mensaje_recibido', { nombre: '🤖 PyBot', texto: "La hora es: " + new Date().toLocaleTimeString(), tipo: 'recibido' });
+            }
+            else if (cmd === '/clima') {
+                socket.emit('mensaje_recibido', { nombre: '🤖 PyBot', texto: "Clima en PyChat: ☀️ 25°C. ¡Ideal para chatear!", tipo: 'recibido' });
+            }
+            else if (cmd === '/dado') {
+                const num = Math.floor(Math.random() * 6) + 1;
+                io.emit('mensaje_recibido', { nombre: '🤖 PyBot', texto: `🎲 ${data.nombre} lanzó un dado y salió: **${num}**`, tipo: 'recibido' });
+            }
+            else if (cmd === '/limpiar') {
+                socket.emit('comando_limpiar');
+            }
+            else if (cmd === '/miau') {
+                try {
+                    const res = await fetch('https://api.thecatapi.com/v1/images/search');
+                    const imgData = await res.json();
+                    io.emit('mensaje_recibido', { nombre: '🤖 PyBot', img: imgData[0].url, tipo: 'imagen' });
+                } catch (e) {
+                    socket.emit('mensaje_recibido', { nombre: '🤖 PyBot', texto: "Los gatitos están durmiendo... intenta luego.", tipo: 'recibido' });
+                }
+            }
+        }
+    });
+
+    socket.on('escribiendo', (n) => socket.broadcast.emit('usuario_escribiendo', n));
+    socket.on('dejo_de_escribir', () => socket.broadcast.emit('usuario_paró'));
+    socket.on('mensaje_leido', (id) => socket.broadcast.emit('confirmacion_lectura', id));
+});
+
+// --- INTERFAZ PyChat ---
+app.get('/', (req, res) => {
+    res.send(`
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>PyChat Oficial</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root { --py-green: #075E54; --py-light: #25D366; --bg-chat: #e5ddd5; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #d1d1d1; overflow: hidden; }
+        
+        #login-screen { position: fixed; inset: 0; background: var(--py-green); display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .login-card { background: white; padding: 35px; border-radius: 20px; text-align: center; width: 300px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+        
+        .header { background: var(--py-green); color: white; padding: 15px; font-weight: bold; position: sticky; top: 0; z-index: 10; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        #typing-indicator { font-size: 12px; color: #b3e5fc; font-style: italic; display: block; height: 14px; }
+
+        #chat { 
+            height: calc(100vh - 130px); 
+            background: var(--bg-chat); 
+            background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
+            padding: 15px; overflow-y: auto; display: flex; flex-direction: column; 
+        }
+
+        .mensaje { max-width: 80%; padding: 10px; margin-bottom: 10px; border-radius: 10px; font-size: 14px; position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.1); word-wrap: break-word; }
+        .enviado { align-self: flex-end; background: #dcf8c6; border-top-right-radius: 0; }
+        .recibido { align-self: flex-start; background: #ffffff; border-top-left-radius: 0; }
+        .sistema { align-self: center; background: #fff3cd; font-size: 11px; padding: 4px 10px; border-radius: 5px; }
+        
+        .status-icon { font-size: 11px; margin-left: 5px; color: #999; }
+        .leido { color: #34b7f1; }
+        .chat-img { max-width: 100%; border-radius: 8px; margin-top: 5px; display: block; }
+
+        .input-area { background: #f0f0f0; padding: 10px; display: flex; gap: 10px; align-items: center; }
+        input[type="text"] { flex: 1; border: none; padding: 12px; border-radius: 25px; outline: none; }
+        button { background: var(--py-green); color: white; border: none; width: 45px; height: 45px; border-radius: 50%; cursor: pointer; font-size: 18px; }
+    </style>
+</head>
+<body>
+    <div id="login-screen">
+        <div class="login-card">
+            <h1 style="color:var(--py-green)">PyChat</h1>
+            <p>Introduce tu nombre</p>
+            <input type="text" id="username" placeholder="Nombre..." style="width:90%; margin-bottom:15px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <button onclick="entrar()" style="width:100%; border-radius:10px;">Entrar</button>
+        </div>
+    </div>
+
+    <div class="header">
+        <span>PyChat Oficial</span>
+        <span id="typing-indicator"></span>
+    </div>
+
+    <div id="chat"></div>
+
+    <div class="input-area">
+        <input type="file" id="fileInput" style="display:none" onchange="enviarArchivo(this)">
+        <button onclick="document.getElementById('fileInput').click()" style="background:none; color:#555">📎</button>
+        <input id="input" type="text" placeholder="Escribe un mensaje..." onkeypress="tecleando()">
+        <button onclick="enviar()">➤</button>
+    </div>
+
+    <script>
+        const socket = io();
+        let user = { nombre: '' };
+        let tTimer;
+
+        function entrar() {
+            const n = document.getElementById('username').value;
+            if(!n) return;
+            user.nombre = n;
+            document.getElementById('login-screen').style.display = 'none';
+            socket.emit('nuevo_usuario', user);
+        }
+
+        function enviar() {
+            const i = document.getElementById('input');
+            if(!i.value) return;
+            const d = { id: Date.now(), nombre: user.nombre, texto: i.value, tipo: 'texto' };
+            socket.emit('mensaje_enviado', d);
+            agregarMensaje(d, 'enviado');
+            i.value = '';
+        }
+
+        function enviarArchivo(input) {
+            const f = input.files[0];
+            const r = new FileReader();
+            r.onload = (e) => {
+                const d = { id: Date.now(), nombre: user.nombre, img: e.target.result, tipo: 'imagen' };
+                socket.emit('mensaje_enviado', d);
+                agregarMensaje(d, 'enviado');
+            };
+            r.readAsDataURL(f);
+        }
+
+        function tecleando() {
+            socket.emit('escribiendo', user.nombre);
+            clearTimeout(tTimer);
+            tTimer = setTimeout(() => socket.emit('dejo_de_escribir'), 2000);
+        }
+
+        socket.on('mensaje_recibido', (d) => {
+            agregarMensaje(d, d.tipo === 'sistema' ? 'sistema' : 'recibido');
+            if(d.id) socket.emit('mensaje_leido', d.id);
+        });
+
+        socket.on('usuario_escribiendo', (n) => document.getElementById('typing-indicator').textContent = n + ' está escribiendo...');
+        socket.on('usuario_paró', () => document.getElementById('typing-indicator').textContent = '');
+        socket.on('comando_limpiar', () => { document.getElementById('chat').innerHTML = ''; });
+        
+        socket.on('confirmacion_lectura', (id) => {
+            const c = document.getElementById('check-'+id);
+            if(c) { c.classList.add('leido'); c.textContent = '✓✓'; }
+        });
+
+        function agregarMensaje(d, clase) {
+            const div = document.createElement('div');
+            div.className = 'mensaje ' + clase;
+            let txt = d.texto ? d.texto.replace(/\\*\\*(.*?)\\*\\*/g, '<b>$1</b>') : '';
+            let content = d.tipo === 'imagen' ? '<img src="'+d.img+'" class="chat-img">' : txt;
+            let check = clase === 'enviado' ? '<span id="check-'+d.id+'" class="status-icon">✓</span>' : '';
+            let meta = d.tipo !== 'sistema' ? '<br><small style="font-size:10px; color:#777">'+(d.nombre || '')+'</small>' : '';
+            div.innerHTML = content + meta + check;
+            document.getElementById('chat').appendChild(div);
+            document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+        }
+    </script>
+</body>
+</html>
+    `);
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log('PyChat listo en puerto ' + PORT));
