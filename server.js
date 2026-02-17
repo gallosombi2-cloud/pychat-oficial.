@@ -6,24 +6,29 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// --- SERVIDOR ---
+// --- LÓGICA DEL SERVIDOR ---
+let estadosGlobales = []; 
+
 io.on('connection', (socket) => {
-    socket.on('nuevo_usuario', (user) => {
-        socket.broadcast.emit('mensaje_recibido', { 
-            texto: `${user.nombre} se ha unido`, 
-            tipo: 'sistema' 
-        });
+    socket.emit('cargar_estados', estadosGlobales);
+
+    socket.on('subir_estado', (estado) => {
+        const nuevoEstado = { ...estado, id: Date.now() };
+        estadosGlobales.unshift(nuevoEstado);
+        if(estadosGlobales.length > 20) estadosGlobales.pop();
+        io.emit('nuevo_estado_recibido', nuevoEstado);
     });
 
-    socket.on('mensaje_enviado', (data) => {
-        socket.broadcast.emit('mensaje_recibido', data);
+    socket.on('mensaje_enviado', (data) => socket.broadcast.emit('mensaje_recibido', data));
+    
+    socket.on('solicitar_limpieza', (pass) => {
+        if(pass === "1234") {
+            estadosGlobales = [];
+            io.emit('limpiar_pantalla_global');
+        }
     });
-
-    socket.on('escribiendo', (n) => socket.broadcast.emit('usuario_escribiendo', n));
-    socket.on('dejo_de_escribir', () => socket.broadcast.emit('usuario_paró'));
 });
 
-// --- INTERFAZ PyChat ---
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -31,122 +36,147 @@ app.get('/', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>PyChat Oficial</title>
+    <title>PyChat Ultimate</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         :root { --py-green: #075E54; --bg-chat: #e5ddd5; }
-        body { margin: 0; font-family: sans-serif; background: #f0f2f5; }
-        #login-screen { position: fixed; inset: 0; background: var(--py-green); display: flex; align-items: center; justify-content: center; z-index: 100; }
-        .login-card { background: white; padding: 25px; border-radius: 15px; text-align: center; width: 280px; }
-        .header { background: var(--py-green); color: white; padding: 15px; font-weight: bold; position: sticky; top: 0; }
-        #chat { height: calc(100vh - 130px); background: var(--bg-chat); padding: 15px; overflow-y: auto; display: flex; flex-direction: column; }
-        .mensaje { max-width: 80%; padding: 8px 12px; margin-bottom: 8px; border-radius: 10px; font-size: 14px; position: relative; }
+        body { margin: 0; font-family: sans-serif; background: #f0f2f5; overflow: hidden; }
+        
+        /* ESTADOS */
+        .status-bar { background: white; padding: 10px; display: flex; gap: 12px; overflow-x: auto; border-bottom: 1px solid #ddd; height: 85px; align-items: center; }
+        .status-item { flex-shrink: 0; text-align: center; width: 60px; position: relative; }
+        .status-circle { width: 55px; height: 55px; border-radius: 50%; border: 3px solid #25D366; object-fit: cover; cursor: pointer; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px; text-align: center; overflow: hidden; padding: 2px; }
+        .status-name { font-size: 10px; margin-top: 4px; color: #555; }
+        
+        /* VISOR */
+        #status-viewer { position: fixed; inset: 0; background: black; z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; }
+        #viewer-content { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 24px; color: white; text-align: center; padding: 20px; box-sizing: border-box; }
+
+        /* GENERAL */
+        .header { background: var(--py-green); color: white; padding: 12px; font-weight: bold; }
+        #chat { height: calc(100vh - 220px); background: var(--bg-chat); padding: 15px; overflow-y: auto; display: flex; flex-direction: column; }
+        .mensaje { max-width: 80%; padding: 10px; margin-bottom: 8px; border-radius: 12px; font-size: 14px; }
         .enviado { align-self: flex-end; background: #dcf8c6; }
-        .recibido { align-self: flex-start; background: #ffffff; }
-        .sistema { align-self: center; background: #fff3cd; font-size: 11px; padding: 4px 10px; border-radius: 5px; margin: 5px; }
+        .recibido { align-self: flex-start; background: white; }
         .input-area { background: #f0f0f0; padding: 10px; display: flex; gap: 8px; }
-        input { flex: 1; border: 1px solid #ddd; padding: 12px; border-radius: 20px; outline: none; }
-        button { background: var(--py-green); color: white; border: none; width: 45px; height: 45px; border-radius: 50%; cursor: pointer; }
+        .btn-round { background: var(--py-green); color: white; border: none; width: 40px; height: 40px; border-radius: 50%; }
+        
+        /* MODAL ESTADO */
+        #modal-tipo { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 150; display: none; align-items: center; justify-content: center; gap: 20px; }
     </style>
 </head>
 <body>
-    <audio id="sonido" src="https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3"></audio>
-
-    <div id="login-screen">
-        <div class="login-card" id="box">
+    <div id="login-screen" style="position:fixed; inset:0; background:var(--py-green); z-index:300; display:flex; align-items:center; justify-content:center;">
+        <div style="background:white; padding:25px; border-radius:20px; text-align:center; width:280px;">
             <h2 style="color:var(--py-green)">PyChat</h2>
-            <input type="text" id="nom" placeholder="Tu Nombre" style="width:90%; margin-bottom:10px;">
-            <input type="text" id="con" placeholder="Teléfono o Correo" style="width:90%; margin-bottom:15px;">
-            <button onclick="paso1()" style="width:100%; border-radius:10px;">Continuar</button>
+            <input type="text" id="nom" placeholder="Tu Nombre" style="width:90%; padding:10px; margin-bottom:10px; border-radius:10px; border:1px solid #ccc;">
+            <button onclick="registrar()" style="width:100%; background:var(--py-green); color:white; padding:12px; border:none; border-radius:10px;">Entrar</button>
         </div>
     </div>
 
-    <div class="header">PyChat <small id="typing" style="margin-left:10px; font-weight:normal; opacity:0.8;"></small></div>
+    <div id="modal-tipo" onclick="this.style.display='none'">
+        <button class="btn-round" style="width:80px; height:80px; background:#25D366;" onclick="document.getElementById('file-in').click()">📷<br>Foto</button>
+        <button class="btn-round" style="width:80px; height:80px; background:#9C27B0;" onclick="crearEstadoTexto()">✍️<br>Texto</button>
+    </div>
+
+    <div id="status-viewer" onclick="this.style.display='none'">
+        <div id="viewer-content"></div>
+    </div>
+
+    <div class="header">PyChat Pro</div>
+    
+    <div class="status-bar" id="status-bar">
+        <div class="status-item" onclick="document.getElementById('modal-tipo').style.display='flex'">
+            <div class="status-circle" style="background:#eee; border:2px dashed #999; color:#999; font-size:25px;">+</div>
+            <div class="status-name">Mi Estado</div>
+        </div>
+    </div>
+
+    <input type="file" id="file-in" hidden accept="image/*" onchange="subirFoto(this)">
+
     <div id="chat"></div>
+
     <div class="input-area">
-        <input id="msg" type="text" placeholder="Mensaje..." onkeypress="teclando()">
-        <button onclick="enviar()">➤</button>
+        <input id="msg" type="text" placeholder="Escribe...">
+        <button class="btn-round" onclick="enviar()">➤</button>
     </div>
 
     <script>
         const socket = io();
-        let miUser = { nombre: '', contacto: '' };
-        let miCod = "";
+        let miUser = { nombre: '' };
 
-        // Al cargar: verificar si ya existe sesión
+        function registrar() {
+            const n = document.getElementById('nom').value;
+            if(!n) return;
+            miUser.nombre = n;
+            localStorage.setItem('p_n', n);
+            document.getElementById('login-screen').style.display = 'none';
+        }
+
         window.onload = () => {
             const n = localStorage.getItem('p_n');
-            const c = localStorage.getItem('p_c');
-            if(n && c) {
-                miUser.nombre = n; miUser.contacto = c;
-                document.getElementById('login-screen').style.display = 'none';
-                socket.emit('nuevo_usuario', miUser);
-            }
+            if(n) { miUser.nombre = n; document.getElementById('login-screen').style.display = 'none'; }
         };
 
-        function paso1() {
-            const n = document.getElementById('nom').value;
-            const c = document.getElementById('con').value;
-            if(!n || !c) return alert("Llena los campos");
-            
-            miUser.nombre = n; miUser.contacto = c;
-            miCod = Math.floor(100000 + Math.random() * 900000).toString();
-            
-            document.getElementById('box').innerHTML = \`
-                <h3>Verificación</h3>
-                <p>Tu código es: <b style="font-size:22px;">\${miCod}</b></p>
-                <input type="text" id="v_in" placeholder="000000" style="width:80%; text-align:center; font-size:20px;">
-                <button onclick="paso2()" style="width:100%; margin-top:15px; border-radius:10px;">Verificar</button>
-            \`;
+        // ESTADOS
+        function subirFoto(input) {
+            const reader = new FileReader();
+            reader.onload = () => socket.emit('subir_estado', { n: miUser.nombre, img: reader.result, tipo: 'img' });
+            if(input.files[0]) reader.readAsDataURL(input.files[0]);
         }
 
-        function paso2() {
-            if(document.getElementById('v_in').value === miCod) {
-                localStorage.setItem('p_n', miUser.nombre);
-                localStorage.setItem('p_c', miUser.contacto);
-                document.getElementById('login-screen').style.display = 'none';
-                socket.emit('nuevo_usuario', miUser);
-                if(Notification.permission !== 'granted') Notification.requestPermission();
-            } else { alert("Código mal"); }
+        function crearEstadoTexto() {
+            const txt = prompt("Escribe tu estado:");
+            if(!txt) return;
+            const colores = ['#9C27B0', '#E91E63', '#2196F3', '#FF9800', '#4CAF50'];
+            const color = colores[Math.floor(Math.random()*colores.length)];
+            socket.emit('subir_estado', { n: miUser.nombre, texto: txt, fondo: color, tipo: 'txt' });
         }
 
-        function enviar() {
-            const m = document.getElementById('msg');
-            if(!m.value) return;
-            const d = { n: miUser.nombre, c: miUser.contacto, t: m.value };
-            socket.emit('mensaje_enviado', d);
-            ponerMsg(d, 'enviado');
-            m.value = '';
-        }
+        socket.on('cargar_estados', (ests) => ests.forEach(e => addEstado(e)));
+        socket.on('nuevo_estado_recibido', (e) => addEstado(e));
 
-        socket.on('mensaje_recibido', (d) => {
-            ponerMsg(d, d.tipo === 'sistema' ? 'sistema' : 'recibido');
-            if(d.n && d.n !== miUser.nombre) {
-                document.getElementById('sonido').play();
-                if(document.visibilityState !== 'visible') {
-                    new Notification(d.n, { body: d.t });
-                }
-            }
-        });
-
-        function teclando() { 
-            socket.emit('escribiendo', miUser.nombre);
-            setTimeout(() => socket.emit('dejo_de_escribir'), 2000);
-        }
-
-        socket.on('usuario_escribiendo', (n) => document.getElementById('typing').textContent = n + ' está escribiendo...');
-        socket.on('usuario_paró', () => document.getElementById('typing').textContent = '');
-
-        function ponerMsg(d, clase) {
+        function addEstado(e) {
+            const bar = document.getElementById('status-bar');
             const div = document.createElement('div');
-            div.className = 'mensaje ' + clase;
-            const hora = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+            div.className = 'status-item';
+            const style = e.tipo === 'txt' ? \`background:\${e.fondo}\` : '';
+            const content = e.tipo === 'txt' ? e.texto.substring(0,10)+'...' : \`<img src="\${e.img}" style="width:100%;height:100%;object-fit:cover;">\`;
             
-            if(clase === 'sistema') {
-                div.innerHTML = d.texto;
+            div.innerHTML = \`<div class="status-circle" style="\${style}" onclick="verEstado('\${e.tipo}', '\${e.texto||''}', '\${e.img||''}', '\${e.fondo||''}')">\${content}</div><div class="status-name">\${e.n}</div>\`;
+            bar.appendChild(div);
+        }
+
+        function verEstado(tipo, txt, img, fondo) {
+            const v = document.getElementById('status-viewer');
+            const c = document.getElementById('viewer-content');
+            v.style.display = 'flex';
+            if(tipo === 'txt') {
+                c.innerHTML = txt;
+                c.style.background = fondo;
             } else {
-                div.innerHTML = \`\${d.t}<br><small style="font-size:9px; opacity:0.6;">\${d.n} • \${hora} \${clase==='enviado'?'<b>✓✓</b>':''}</small>\`;
+                c.innerHTML = \`<img src="\${img}" style="max-width:100%; max-height:90vh;">\`;
+                c.style.background = 'black';
             }
+            setTimeout(() => v.style.display = 'none', 4000);
+        }
+
+        // CHAT
+        function enviar() {
+            const i = document.getElementById('msg');
+            if(!i.value) return;
+            const d = { n: miUser.nombre, t: i.value };
+            socket.emit('mensaje_enviado', d);
+            poner(d, 'enviado');
+            i.value = '';
+        }
+
+        socket.on('mensaje_recibido', (d) => poner(d, 'recibido'));
+
+        function poner(d, c) {
+            const div = document.createElement('div');
+            div.className = 'mensaje ' + c;
+            div.innerHTML = \`<b>\${d.n}</b><br>\${d.t}\`;
             document.getElementById('chat').appendChild(div);
             document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
         }
@@ -156,5 +186,4 @@ app.get('/', (req, res) => {
     `);
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log('OK'));
+server.listen(process.env.PORT || 3000, () => console.log('Ready'));
