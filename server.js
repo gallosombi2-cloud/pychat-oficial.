@@ -4,7 +4,7 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { cors: { origin: "*" } });
 
 let usuariosOnline = {}; 
 
@@ -34,56 +34,98 @@ app.get('/', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PyChat Elite</title>
+    <title>PyChat Elite 🔒</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        :root { --py-green: #075e54; --bg: #0b141a; --mio: #005c4b; --otro: #202c33; --txt: #e9edef; }
-        body { margin: 0; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--txt); }
-        .header { background: var(--py-green); padding: 15px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
-        #lista-contactos { background: #111b21; border-bottom: 1px solid #222; padding: 10px; display: flex; gap: 10px; overflow-x: auto; min-height: 50px; }
-        .contacto { background: #202c33; padding: 8px 15px; border-radius: 20px; border: 1px solid #333; cursor: pointer; white-space: nowrap; font-size: 14px; }
-        .contacto.activo { background: #00a884; border-color: #00a884; }
-        #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
-        .msg { padding: 12px; border-radius: 12px; max-width: 80%; position: relative; animation: fadeIn 0.3s ease; }
-        @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-        .mio { align-self: flex-end; background: var(--mio); }
-        .otro { align-self: flex-start; background: var(--otro); }
+        :root { 
+            --py-green: #075e54; 
+            --bg: #0b141a; 
+            --mio: #005c4b; 
+            --otro: #202c33; 
+            --txt: #e9edef; 
+            --accent: #00a884;
+            --wallpaper: none;
+        }
+        body { 
+            margin: 0; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; 
+            background-color: var(--bg); 
+            background-image: var(--wallpaper);
+            background-size: cover;
+            background-position: center;
+            color: var(--txt); 
+        }
+        .header { background: var(--py-green); padding: 15px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
         
-        /* Indicador de grabación */
-        #recording-status { display: none; color: #ff3b30; font-size: 12px; text-align: center; padding: 5px; font-weight: bold; animation: pulse 1s infinite; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        #lista-contactos { background: rgba(17, 27, 33, 0.9); padding: 12px; display: flex; gap: 12px; overflow-x: auto; min-height: 45px; border-bottom: 1px solid #222; }
+        .contacto { background: #202c33; padding: 8px 18px; border-radius: 20px; border: 1px solid #333; cursor: pointer; white-space: nowrap; font-size: 14px; }
+        .contacto.activo { background: var(--accent); border-color: var(--accent); }
+
+        #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+        .msg { padding: 12px; border-radius: 12px; max-width: 80%; position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+        .mio { align-self: flex-end; background: var(--mio); border-bottom-right-radius: 2px; }
+        .otro { align-self: flex-start; background: var(--otro); border-bottom-left-radius: 2px; }
+
+        #modal-config { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 6000; align-items: center; justify-content: center; }
+        .config-card { background: #202c33; padding: 25px; border-radius: 20px; width: 85%; max-width: 300px; text-align: center; }
 
         .input-bar { background: #202c33; padding: 10px; display: flex; gap: 10px; align-items: center; padding-bottom: env(safe-area-inset-bottom); }
         #m { flex: 1; border: none; padding: 12px; border-radius: 25px; background: #2a3942; color: white; outline: none; font-size: 16px; }
-        .btn-round { background: #00a884; color: white; border: none; width: 50px; height: 50px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; transition: 0.3s; }
-        #login { position: fixed; inset: 0; background: var(--bg); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+        .btn-circle { background: var(--accent); color: white; border: none; width: 50px; height: 50px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+        
+        #login { position: fixed; inset: 0; background: var(--bg); z-index: 5000; display: flex; align-items: center; justify-content: center; }
     </style>
 </head>
 <body>
     <div id="login">
-        <div style="background:#202c33; padding:30px; border-radius:20px; text-align:center; width:85%; max-width:350px;">
-            <h2 style="color:#00a884">PyChat Elite</h2>
-            <input type="text" id="nick" placeholder="Tu nombre..." style="width:100%; padding:15px; border-radius:10px; border:none; background:#2a3942; color:white;">
-            <button onclick="entrar()" style="width:100%; margin-top:20px; padding:15px; background:#00a884; color:white; border:none; border-radius:10px; font-weight:bold;">ACCEDER</button>
+        <div style="background:#202c33; padding:30px; border-radius:20px; text-align:center; width:85%;">
+            <h2 style="color:var(--accent)">PyChat Elite 🔒</h2>
+            <input type="text" id="nick" placeholder="Tu nombre..." style="width:100%; padding:14px; border-radius:10px; border:none; background:#2a3942; color:white;">
+            <button onclick="entrar()" style="width:100%; margin-top:20px; padding:14px; background:var(--accent); color:white; border:none; border-radius:10px; font-weight:bold;">INGRESAR</button>
+        </div>
+    </div>
+
+    <div id="modal-config">
+        <div class="config-card">
+            <h3 style="margin-top:0; color:var(--accent);">Configuración ⚙️</h3>
+            
+            <div style="text-align:left; margin-bottom:15px;">
+                <label style="font-size:12px; color:#8696a0;">Fondo de Chat:</label>
+                <select id="wall-select" style="width:100%; padding:10px; background:#2a3942; color:white; border:none; border-radius:8px; margin-top:5px;">
+                    <option value="none">Sólido Oscuro</option>
+                    <option value="url('https://www.transparenttextures.com/patterns/dark-matter.png')">Noche Estrellada</option>
+                    <option value="url('https://www.transparenttextures.com/patterns/clouds.png')">Nubes Suaves</option>
+                </select>
+            </div>
+
+            <div style="text-align:left; margin-bottom:15px;">
+                <label style="font-size:12px; color:#8696a0;">Color de Burbujas:</label>
+                <select id="color-select" style="width:100%; padding:10px; background:#2a3942; color:white; border:none; border-radius:8px; margin-top:5px;">
+                    <option value="#075e54,#00a884,#005c4b">Verde Clásico</option>
+                    <option value="#1e3a8a,#3b82f6,#1e40af">Azul Profundo</option>
+                    <option value="#581c87,#a855f7,#7e22ce">Violeta Ghost</option>
+                </select>
+            </div>
+
+            <button onclick="guardarConfig()" style="width:100%; padding:12px; background:var(--accent); color:white; border:none; border-radius:10px; font-weight:bold;">APLICAR</button>
         </div>
     </div>
 
     <div class="header">
         <span>PyChat Elite 🔒</span>
-        <div style="display:flex; gap:15px;">
-            <span onclick="invitar()" style="cursor:pointer; font-size:24px;">👤+</span>
-            <span onclick="location.reload()" style="cursor:pointer; font-size:22px;">🔄</span>
+        <div style="display:flex; gap:15px; align-items:center;">
+            <span onclick="compartir()" style="cursor:pointer; font-size:24px;">👤+</span>
+            <span onclick="abrirConfig()" style="cursor:pointer; font-size:22px;">⚙️</span>
+            <span onclick="location.reload()" style="cursor:pointer; font-size:20px;">🔄</span>
         </div>
     </div>
 
     <div id="lista-contactos"></div>
-    <div id="recording-status">🔴 GRABANDO AUDIO...</div>
     <div id="chat"></div>
 
     <div class="input-bar">
-        <button id="btn-audio" class="btn-round" onclick="controlVoz()">🎤</button>
+        <button id="btn-mic" class="btn-circle" onclick="toggleAudio()">🎤</button>
         <input type="text" id="m" placeholder="Toca un contacto..." disabled>
-        <button onclick="enviarTexto()" class="btn-round">➤</button>
+        <button onclick="enviarTexto()" class="btn-circle">➤</button>
     </div>
 
     <script>
@@ -95,13 +137,24 @@ app.get('/', (req, res) => {
             if(miNick) { document.getElementById('login').style.display = 'none'; socket.emit('nuevo_usuario', miNick); }
         }
 
-        async function invitar() {
+        function abrirConfig() { document.getElementById('modal-config').style.display = 'flex'; }
+        
+        function guardarConfig() {
+            const wall = document.getElementById('wall-select').value;
+            const colores = document.getElementById('color-select').value.split(',');
+            
+            document.documentElement.style.setProperty('--wallpaper', wall);
+            document.documentElement.style.setProperty('--py-green', colores[0]);
+            document.documentElement.style.setProperty('--accent', colores[1]);
+            document.documentElement.style.setProperty('--mio', colores[2]);
+            
+            document.getElementById('modal-config').style.display = 'none';
+        }
+
+        async function compartir() {
             if (navigator.share) {
-                await navigator.share({ title: 'PyChat Elite', text: 'Hablemos en privado aquí:', url: window.location.href });
-            } else {
-                navigator.clipboard.writeText(window.location.href);
-                alert("Link copiado. Pégalo en el chat de tu contacto.");
-            }
+                await navigator.share({ title: 'PyChat Elite', text: 'Hablemos privado:', url: window.location.href });
+            } else { alert("Link copiado!"); }
         }
 
         socket.on('actualizar_lista', (users) => {
@@ -115,7 +168,7 @@ app.get('/', (req, res) => {
                     div.onclick = () => {
                         receptorId = id;
                         document.getElementById('m').disabled = false;
-                        document.getElementById('m').placeholder = "Mensaje a " + users[id];
+                        document.getElementById('m').placeholder = "Chat con " + users[id];
                         document.querySelectorAll('.contacto').forEach(c => c.classList.remove('activo'));
                         div.classList.add('activo');
                     };
@@ -124,11 +177,9 @@ app.get('/', (req, res) => {
             }
         });
 
-        async function controlVoz() {
-            if (!receptorId) return alert("Elige un contacto primero");
-            const btn = document.getElementById('btn-audio');
-            const status = document.getElementById('recording-status');
-
+        async function toggleAudio() {
+            if (!receptorId) return alert("Selecciona a alguien arriba");
+            const btn = document.getElementById('btn-mic');
             if (!grabando) {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -144,16 +195,11 @@ app.get('/', (req, res) => {
                     };
                     mediaRec.start();
                     grabando = true;
-                    btn.style.background = "#ff3b30";
-                    btn.innerText = "🛑";
-                    status.style.display = "block";
-                } catch (e) { alert("Permite el micrófono en los ajustes del sitio."); }
+                    btn.style.background = "#ff3b30"; btn.innerText = "🛑";
+                } catch (e) { alert("Permite el micrófono"); }
             } else {
-                mediaRec.stop();
-                grabando = false;
-                btn.style.background = "#00a884";
-                btn.innerText = "🎤";
-                status.style.display = "none";
+                mediaRec.stop(); grabando = false;
+                btn.style.background = "var(--accent)"; btn.innerText = "🎤";
             }
         }
 
@@ -171,16 +217,14 @@ app.get('/', (req, res) => {
             const div = document.createElement('div');
             div.className = 'msg ' + (mio ? 'mio' : 'otro');
             if(d.texto) div.innerText = d.texto;
-            if(d.audio) div.innerHTML = \`<audio src="\${d.audio}" controls style="width:210px;"></audio>\`;
+            if(d.audio) div.innerHTML = \`<audio src="\${d.audio}" controls style="width:200px;"></audio>\`;
             document.getElementById('chat').appendChild(div);
             document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
-            
-            // Modo Fantasma (10s)
             setTimeout(() => {
-                div.style.transition = "opacity 1s";
+                div.style.transition = "opacity 0.8s";
                 div.style.opacity = "0";
                 setTimeout(() => div.remove(), 1000);
-            }, 10000);
+            }, 15000); // 15 segundos para dar tiempo a leer con el nuevo diseño
         }
     </script>
 </body>
