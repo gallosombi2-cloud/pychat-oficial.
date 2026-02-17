@@ -1,14 +1,17 @@
 {
-  "name": "pychat-oficial",
+  "name": "pychat-pro",
   "version": "1.0.0",
-  "description": "Aplicación PyChat con PyBot",
+  "description": "Chat profesional con base de datos",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
   "dependencies": {
     "express": "^4.18.2",
     "socket.io": "^4.7.2",
-    "node-fetch": "^3.3.2"
+    "nedb": "^1.8.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=14.0.0"
   }
 }
